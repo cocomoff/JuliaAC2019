@@ -1,0 +1,45 @@
+# はじめに
+
+本記事は[Julia Advent Calendar 2019](https://qiita.com/advent-calendar/2019/julialang)の15日目の記事として書きました．コンセプトは「数理計画問題をJulia上のJuMPでサクっと楽しむ」です．書く上で次の資料を参考に書いていたり，例題を借りてきたりしています．
+
+- [整数計画問題の定式化と解法/大阪大学 梅谷先生](https://speakerdeck.com/umepon/an-introduction-to-integer-programming)
+- [線形計画問題/筑波大学 久野先生](http://www.cs.tsukuba.ac.jp/~takahito/sys_math/part1.pdf)
+
+## 環境
+
+執筆時点で最新だったJulia1.3の上で実行しました．
+
+- Julia 1.3.0 (2019-11-26)
+- Cbc v0.6.6
+- JuMP v0.20.1
+- Weave v0.9.1 (執筆用)
+
+## 線形計画問題のモデリング
+
+栄養問題の例をモデリングしてみます．だいたい式のまま書くだけです．
+
+~~~julia
+using JuMP
+using Cbc
+
+model = Model(with_optimizer(Cbc.Optimizer))
+
+# model
+@variable(model, x₁ ≥ 0)
+@variable(model, x₂ ≥ 0)
+@objective(model, Min, 50x₁ + 65x₂)
+@constraint(model, 3x₁ + 2x₂ ≥ 9)
+@constraint(model, x₁/15 + 2x₂/15 ≥ 1/3)
+@constraint(model, x₁/6 ≥ 1/4)
+@constraint(model, 3x₂ ≥ x₁)
+@constraint(model, x₂ ≤ 2x₁)
+
+# solve
+optimize!(model)
+
+# get objective value and variables
+obj = objective_value(model)
+vx1 = value(x₁)
+vx2 = value(x₂)
+println("Obj $obj (x₁=$vx1, x₂=$vx2)")
+~~~
