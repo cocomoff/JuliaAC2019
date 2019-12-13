@@ -1,6 +1,6 @@
 # はじめに
 
-本記事は[Julia Advent Calendar 2019](https://qiita.com/advent-calendar/2019/julialang)の15日目の記事として書きました．コンセプトは「数理計画問題をJulia上のJuMPでサクっと楽しむ」です．書く上で次の資料を参考に書いていたり，例題を借りてきたりしています．
+本記事は[Julia Advent Calendar 2019](https://qiita.com/advent-calendar/2019/julialang)の15日目の記事として書きました．コンセプトは「数理計画問題をJulia上のJuMPでサクっと楽しむ」です．書く上で次の資料を参考に書いていたり，例題を借りてきたりしています．著者はこれが終わったら，JuMPの日本語訳をやるつもりです(？)．
 
 - [整数計画問題の定式化と解法/大阪大学 梅谷先生](https://speakerdeck.com/umepon/an-introduction-to-integer-programming)
 - [線形計画問題/筑波大学 久野先生](http://www.cs.tsukuba.ac.jp/~takahito/sys_math/part1.pdf)
@@ -15,6 +15,8 @@
 - Weave v0.9.1 (執筆用)
 
 ## 線形計画問題のモデリング
+
+### 栄養問題
 
 栄養問題の例をモデリングしてみます．だいたい式のまま書くだけです．
 
@@ -43,3 +45,175 @@ vx1 = value(x₁)
 vx2 = value(x₂)
 println("Obj $obj (x₁=$vx1, x₂=$vx2)")
 ~~~
+
+### 輸送問題
+
+次は [こちら(NTTデータ数理システムのページ)に出てくる輸送問題の例](http://www.msi.co.jp/nuopt/docs/v19/examples/html/02-02-00.html) をコーディングしてみます．大体上の栄養問題と同じような感じが，可読性のため変数を配列化しています．
+
+~~~julia
+using JuMP
+using Cbc
+
+# 例題インスタンスの定数
+Nf = 2;
+Ns = 3;
+C = [[3.4, 2.2, 2.9], [3.4, 2.4, 2.5]];
+Supply = [250, 450];
+Demand = [200, 200, 200];
+
+# モデルと計算
+model = Model(with_optimizer(Cbc.Optimizer, logLevel=0))
+
+@variable(model, x[i=1:Nf, j=1:Ns] ≥ 0)
+
+for factory in 1:Nf
+    @constraint(model, sum(x[factory, :]) <= Supply[factory])
+end
+
+for store in 1:Ns
+    @constraint(model, sum(x[:, store]) == Demand[store])
+end
+
+@objective(model, Min, sum(C[i][j] * x[i, j] for i in 1:Nf, j in 1:Ns))
+optimize!(model)
+
+for f in 1:Nf, s in 1:Ns
+    println("Factory $f -> Store $s: $(value(x[f, s]))")
+end
+println(objective_value(model))
+~~~
+
+
+最適輸送問題（参照: [Computational Optimal Transport 精読会 記録 (#1: 2.1-2.3)
+](https://qiita.com/takilog/items/3f150a6868a8f58b2ed6)）におけるKantrovich緩和問題も似た形で解くことができます．全て動くデータ例はgithubのレポジトリに置いてありますので興味がある人は見てみてください．
+
+```julia
+model = Model(with_optimizer(Cbc.Optimizer, logLevel=0))
+N = 100
+M = 100
+x = rand(100)
+y = rand(100)
+x ./= sum(x)
+y ./= sum(y)
+
+@variable(model, 0.0 <= P[1:N, 1:M] <= 1.0)
+
+# x(row) and y(column) margin
+for i in 1:M
+    @constraint(model, sum(P[i, j] for j in 1:M) == x[i])
+end
+for i in 1:N
+    @constraint(model, sum(P[j, i] for j in 1:N) == y[i])
+end
+
+@objective(model, Min, sum(C[i, j] * P[i, j] for i in 1:N, j in 1:M));
+```
+
+
+### 線形回帰問題
+
+次はスライドに出てくる線形回帰問題(係数$a$と切片$b$を求める)を説いてみます．スライドにあるように，誤差(絶対値)を開いて両方向を$z$で抑え，この和を最小化することで切片$a$と$b$を求めます．わかりやすいようにPlots.jlを利用した図を添えました．
+
+まず，疑似データを$a=1.5, b=0.3$として，適当なノイズを乗せて作成します．
+
+~~~julia
+using Random
+using Plots
+
+# 疑似データの作成
+a = 1.5
+b = 0.3
+n = 20
+ϵ = 0.1
+x = rand(n)
+y = a * x .+ b .+ ϵ * randn(n);
+xx = 0:0.01:1;
+yy = a * xx .+ b;
+scatter(x, y, mark=:circle)
+plot!(xx, yy, color=:red)
+~~~
+
+
+次に$a$と$b$をデータ$x, y$から求めてみます
+
+~~~julia
+using JuMP
+using Cbc
+
+model = Model(with_optimizer(Cbc.Optimizer))
+
+@variable(model, a)
+@variable(model, b)
+@variable(model, z[1:n] >= 0)
+
+for i in 1:n
+    @constraint(model, y[i] - (a * x[i] + b) ≥ - z[i])
+    @constraint(model, y[i] - (a * x[i] + b) ≤ z[i])
+end
+
+@objective(model, Min, sum(z[:]))
+optimize!(model)
+opt_a = value(a)
+opt_b = value(b)
+println(opt_a)
+println(opt_b)
+~~~
+
+結果を重ねてプロットしてみると，そこそこ良い回帰直線が得られました．
+
+~~~julia
+xxx = 0:0.01:1;
+yyy = opt_a * xx .+ opt_b;
+scatter(x, y, mark=:circle)
+plot!(xx, yy, color=:red)
+plot!(xxx, yyy, color=:blue)
+~~~
+
+
+## 整数計画
+
+場合によりますが，例えば2値(0と1)を取るような整数変数は，変数制限時の引数に**Bin**を与えることで実現できます．一般の整数の場合は**Int**を与えます．ただし整数計画を利用する場合には，整数計画に対応したソルバー(with_optimizerのところ)を用意する必要があります．小規模な問題であればCbcで大丈夫ですが，大規模な問題を解くためには，おそらく，CPLEX.jlやGurobi.jlを利用する必要があります．私は仕事ではGurobi.jlを通してGurobi 7系もしくは8系を使っています．利用しているGurobiが今後9系になったとき，Gurobi.jlが互換性があるかどうかは分からないです．
+
+JuMPを利用していると，Gurobi.jlのmodelとJuMPの想定しているmodelが別の型になるので注意が必要です．例えばGurobi.jlにはモデルをファイルに出力する機能があります（https://github.com/JuliaOpt/Gurobi.jl/blob/master/src/grb_model.jl#L144-L152 参照）が，JuMPを通している場合はこの関数を利用できません．そのためGurobiが備えている解のファイル出力など（拡張子を.solファイルにする）などを使えません．実装を見てみるとgrb_ccallというマクロ経由で関数を利用しています．実際に実装を見てみると以下のような形式です．
+
+```julia
+macro grb_ccall(func, args...)
+    f = "GRB$(func)"
+    args = map(esc,args)
+    if Sys.isunix()
+        return quote
+            ccall(($f,libgurobi), $(args...))
+        end
+    elseif Sys.iswindows()
+        return quote
+            ccall(($f,libgurobi), $(esc(:stdcall)), $(args...))
+        end
+    end
+    error("System not recognised.s")
+end
+
+function write_model(model::Model, filename::String)
+    @assert isascii(filename) # TODO: support non-ascii file names
+    ret = @grb_ccall(write, Cint, (Ptr{Cvoid}, Ptr{UInt8}),
+        model.ptr_model, filename)
+    if ret != 0
+        throw(GurobiError(model.env, ret))
+    end
+    nothing
+end
+```
+
+対応しているGurobiの関数をサイト（https://www.google.co.jp/search?q=GRBwrite&ie=utf-8&oe=utf-8&hl=ja）から確認してみると，いろいろな機能がついています．
+
+> filename: The name of the file to be written. The file type is encoded in the file name suffix. Valid suffixes are .mps, .rew, .lp, or .rlp for writing the model itself, .ilp for writing just the IIS associated with an infeasible model (see GRBcomputeIIS for further information), .sol for writing the current solution, .mst for writing a start vector, .hnt for writing a hint file, .bas for writing an LP basis, or .prm for writing modified parameter settings. If your system provides compressing utilities (e.g., 7z or zip for Windows, and gzip, bzip2, or unzip for Linux or Mac OS); then the files can be compressed, so additional suffixes of .gz, .bz2, or .7z are accepted.
+
+そのため，この関数を使いたい場合には，JuMPのモデルから裏側で利用しているbackendのモデルを取ってくるか，MathOptFormat.jlを経由してファイル書き出しをする必要があります．このあたりの細かい制約についてはまたどこかでまとめたいと思います．適当にbackendのモデルを取ってくると，せっかくJuMP経由で読みやすい問題を書いた変数名などが飛んでしまうので，MathOptFormat.jlが使える場合は使ったほうがいいのではないかと思います（もしかしたら回避できるかもしれません）．実際，細かいGurobiのチューニングをしたい場合には，Gurobiが提供しているPython形式の対話式シェルで実行した方が良いことは多いかもしれません．こういう場合には，MathOptFormat.jlを経由してモデルファイルを書き出し，それをGurobi（や他のソルバーのシェル）から呼び出せば良いでしょう．
+
+
+### リンク
+
+- この記事を踏まえた例題レポジトリ https://github.com/cocomoff/JuliaAC2019
+- JuliaOpt https://github.com/JuliaOpt
+- JuMP.jl https://github.com/JuliaOpt/JuMP.jl
+- Gurobi.jl https://github.com/JuliaOpt/Gurobi.jl
+- MathOptFormat.jl https://github.com/odow/MathOptFormat.jl
