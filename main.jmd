@@ -88,6 +88,9 @@ println(objective_value(model))
 ](https://qiita.com/takilog/items/3f150a6868a8f58b2ed6)）におけるKantrovich緩和問題も似た形で解くことができます．全て動くデータ例はgithubのレポジトリに置いてありますので興味がある人は見てみてください．
 
 ```julia
+using Plots
+gr()
+
 model = Model(with_optimizer(Cbc.Optimizer, logLevel=0))
 N = 100
 M = 100
@@ -106,7 +109,16 @@ for i in 1:N
     @constraint(model, sum(P[j, i] for j in 1:N) == y[i])
 end
 
-@objective(model, Min, sum(C[i, j] * P[i, j] for i in 1:N, j in 1:M));
+@objective(model, Min, sum(abs(i - j) * P[i, j] for i in 1:N, j in 1:M));
+
+optimize!(model)
+
+valP = zeros(100, 100)
+for i in 1:100, j in 1:100
+    valP[i, j] = value(P[i, j])
+end
+
+heatmap(1:100, 1:100, valP, colorbar=false, size=(400, 400))
 ```
 
 
